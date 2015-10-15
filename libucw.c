@@ -61,7 +61,7 @@ typedef int execve_func_t(const char *path, char *const argv[], char *const envv
 
 static execve_func_t *libc_execve = NULL;
 
-#if 1
+#if 0
 void ucw_log(char *fmt, ...)
 {
 FILE       *log;
@@ -111,7 +111,7 @@ if (libc_execve != NULL) return;
 /**
 * Compare end of strings 
 */
-int strendcmp(char *str, char *end)
+int strendcmp(const char *str, const char *end)
 {
     size_t slen;
     size_t elen;
@@ -164,7 +164,7 @@ bool resolve_path(char *out, size_t outsz, const char *filename)
         ppath += plen;
 
         /* This is the last entry in the string? */
-        if (ppath[plen] == '\0')
+        if (*ppath == '\0')
         {
             break;
         }
@@ -192,7 +192,6 @@ bool resolve_path(char *out, size_t outsz, const char *filename)
         /* Append the filename */
         strcat(opath, filename);
 
-        ucw_log("checking: %s\n", opath);
         /* Check if this path is accessible and is executable */
         if (access(opath, X_OK) == 0)
         {
@@ -231,6 +230,14 @@ bool gcc_check(const char *path, char *const argv[], char *const envv[])
     char           *gcc_path = NULL;
     int             gcc_fd   = -1;
 
+    /* Check if the gcc_path ends in "gcc" */
+    if (strendcmp(path, "gcc") != 0 &&
+        strendcmp(path, "g++") != 0 && 
+        strendcmp(path, "c++") != 0)
+    {
+        goto exit;
+    }
+
     if (lstat(path, &st) == 0)
     {
         /* She-bang detection, if we're executing a script, do not run it through ccache */
@@ -257,30 +264,22 @@ bool gcc_check(const char *path, char *const argv[], char *const envv[])
 
     if (gcc_path == NULL) gcc_path = strdup(path);
 
-    /* Check if the gcc_path ends in "gcc" */
-    if (strendcmp(gcc_path, "gcc") != 0 &&
-        strendcmp(gcc_path, "g++") != 0 && 
-        strendcmp(gcc_path, "c++") != 0)
-        {
-            goto exit;
-        }
+    /*
+     * CCACHE doesn't know how to handle the --save-temps option which is
+     * used by some configure scripts to inspect temporary files produced during compilation
+     */
+    for (argp = (char **)argv; *argp != NULL; argp++)
+    {
+        if (strendcmp(*argp, "save-temps") == 0) goto exit;
+    }
 
-        /*
-         * CCACHE doesn't know how to handle the --save-temps option which is
-         * used by some configure scripts to inspect temporary files produced during compilation
-         */
-        for (argp = (char **)argv; *argp != NULL; argp++)
-        {
-            if (strendcmp(*argp, "save-temps") == 0) goto exit;
-        }
-
-        gcc_found = true;
+    gcc_found = true;
 
 exit:
-        if (gcc_fd >= 0) close(gcc_fd);
-        if (gcc_path != NULL) free(gcc_path);
+    if (gcc_fd >= 0) close(gcc_fd);
+    if (gcc_path != NULL) free(gcc_path);
 
-        return gcc_found;
+    return gcc_found;
 }
 
 /**
@@ -401,6 +400,8 @@ int ccache_exec(const char *path, char *const argv[], char *const envv[])
     }
 #endif
 
+    ucw_log("CCACHE_EXEC: %s\n", new_argv[0]);
+
     retval = libc_execve(CCACHE_BIN, new_argv, new_envv);
     if (retval != 0)
     {
@@ -438,7 +439,6 @@ int execve(const char *path, char *const argv[], char *const envv[])
         return libc_execve(path, argv, envv);
     }
 
-    
     /* If we're not executing a GCC binary, just bypass it */
     if (gcc_check(path, argv, envv))
     {
