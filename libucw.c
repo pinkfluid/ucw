@@ -46,6 +46,9 @@
 #include <string.h>
 #include <errno.h>
 
+/**
+ * Default ccache binary path; in case it's not found in PATH or is not set via UCW_CCACHE_BIN
+ */
 #define CCACHE_BIN  "/usr/bin/ccache"
 
 /*
@@ -210,11 +213,52 @@ exit:
     if (outsz < (strlen(psrc) + 1))
     {
         /* Not enough space on target */
+        ucw_log("Not enough space resolving: %s\n", filename);
         return false;
     }
 
     strncpy(out, psrc, outsz);
+
+    ucw_log("Name resolved: %s -> %s\n", filename, out);
+
     return true;
+}
+
+char *ccache_path(void)
+{
+    char           *cpath_env;
+    static char     cpath[PATH_MAX] = "";
+
+    if (cpath[0] != '\0') return cpath;
+
+    /*
+     * First, check the environment variable UCW_CCACHE_BIN
+     */
+    cpath_env = getenv("UCW_CCACHE_BIN");
+    if (cpath_env != NULL)
+    {
+        if (strlen(cpath_env) >= sizeof(cpath))
+        {
+            printf("UCW_CCACHE_BIN too big, ignoring.\n");
+        }
+        else
+        {
+            strncpy(cpath, getenv("UCW_CCACHE_BIN"), sizeof(cpath));
+            return cpath;
+        }
+    }
+
+    /*
+     * Next, check PATH
+     */
+    if (resolve_path(cpath, sizeof(cpath), "ccache"))
+    {
+        return cpath;
+    }
+
+    strcpy(cpath, CCACHE_BIN);
+
+    return cpath;
 }
 
 /**
@@ -263,6 +307,12 @@ bool gcc_check(const char *path, char *const argv[], char *const envv[])
     }
 
     if (gcc_path == NULL) gcc_path = strdup(path);
+
+    /* Check if the path is executable */
+    if (access(gcc_path, X_OK) != 0)
+    {
+        goto exit;
+    }
 
     /*
      * CCACHE doesn't know how to handle the --save-temps option which is
@@ -351,7 +401,7 @@ int ccache_exec(const char *path, char *const argv[], char *const envv[])
 
     /**
      * Mangle the argument list:
-     *  - As first argument insert CCACHE_BIN
+     *  - As first argument insert ccache_path()
      *  - As second argument insert the full path
      *  - Ignore the first argument (the filename) from the first list
      */
@@ -359,7 +409,7 @@ int ccache_exec(const char *path, char *const argv[], char *const envv[])
     dp = (char **)new_argv;
 
     /* ARGv[0] must be ccache, ARGV[1] must the full path */
-    *dp++ = CCACHE_BIN;
+    *dp++ = ccache_path();
     *dp++ = (char *)path;
 
     /* Some error checking */
@@ -402,10 +452,10 @@ int ccache_exec(const char *path, char *const argv[], char *const envv[])
 
     ucw_log("CCACHE_EXEC: %s\n", new_argv[0]);
 
-    retval = libc_execve(CCACHE_BIN, new_argv, new_envv);
+    retval = libc_execve(ccache_path(), new_argv, new_envv);
     if (retval != 0)
     {
-        ucw_log("execve failed: %s %s\n", CCACHE_BIN, strerror(errno));
+        ucw_log("execve failed: %s %s\n", ccache_path(), strerror(errno));
         ucw_log("PATH: %s -- %s %s %s\n", path, new_argv[0], new_argv[1], new_argv[2]);
 
         dp = new_argv;
@@ -450,9 +500,18 @@ int execve(const char *path, char *const argv[], char *const envv[])
 
 int execv(const char *path, char *const argv[])
 {
+    int retval;
+
     ucw_log("EXECV: %s\n", path);
 
-    return execve(path, argv, environ);
+
+    retval = execve(path, argv, environ);
+    if (retval != 0)
+    {
+        ucw_log("EXECVE failed: %s\n", path);
+    }
+
+    return retval;
 }
 
 int execvpe(const char *path, char *const argv[], char *const envv[])

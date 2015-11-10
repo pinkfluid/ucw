@@ -1,3 +1,5 @@
+CC := gcc
+
 all: ucw libucw.so
 
 ucw: ucw.c

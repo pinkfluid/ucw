@@ -52,6 +52,9 @@ bool get_self(char *path, size_t pathsz)
     return true;
 }
 
+/* Defined in libucw.so */
+extern bool resolve_path(char *out, size_t outsz, const char *filename);
+
 int main(int argc, char *argv[])
 {
     char exec_path[PATH_MAX];
