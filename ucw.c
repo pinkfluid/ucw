@@ -72,7 +72,7 @@ int main(int argc, char *argv[])
 
     libdir = dirname(exec_path);
 
-    snprintf(libucw_path, sizeof(libucw_path), "%s/%s", libdir, "libucw.so");
+    snprintf(libucw_path, sizeof(libucw_path), "%s/../lib/ucw/%s", libdir, "${LIB}/libucw.so");
 
     setenv("LD_PRELOAD", libucw_path, 1);
 
